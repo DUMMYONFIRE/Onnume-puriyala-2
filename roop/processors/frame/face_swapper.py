@@ -1,100 +1,56 @@
-from typing import Any, List, Callable
-import cv2
-import insightface
-import threading
+#!/usr/bin/env python3
+""" The master faceswap.py script """
+import gettext
+import locale
+import os
+import sys
 
-import roop.globals
-import roop.processors.frame.core
-from roop.core import update_status
-from roop.face_analyser import get_one_face, get_many_faces, find_similar_face
-from roop.face_reference import get_face_reference, set_face_reference, clear_face_reference
-from roop.typing import Face, Frame
-from roop.utilities import conditional_download, resolve_relative_path, is_image, is_video
+# Translations don't work by default in Windows, so hack in environment variable
+if sys.platform.startswith("win"):
+    os.environ["LANG"], _ = locale.getdefaultlocale()
 
-FACE_SWAPPER = None
-THREAD_LOCK = threading.Lock()
-NAME = 'ROOP.FACE-SWAPPER'
+from lib.cli import args as cli_args  # pylint:disable=wrong-import-position
+from lib.config import generate_configs  # pylint:disable=wrong-import-position
 
+# LOCALES
+_LANG = gettext.translation("faceswap", localedir="locales", fallback=True)
+_ = _LANG.gettext
 
-def get_face_swapper() -> Any:
-    global FACE_SWAPPER
+if sys.version_info < (3, 10):
+    raise ValueError("This program requires at least python 3.10")
 
-    with THREAD_LOCK:
-        if FACE_SWAPPER is None:
-            model_path = resolve_relative_path('../models/inswapper_128.onnx')
-            FACE_SWAPPER = insightface.model_zoo.get_model(model_path, providers=roop.globals.execution_providers)
-    return FACE_SWAPPER
+_PARSER = cli_args.FullHelpArgumentParser()
 
 
-def clear_face_swapper() -> None:
-    global FACE_SWAPPER
-
-    FACE_SWAPPER = None
-
-
-def pre_check() -> bool:
-    download_directory_path = resolve_relative_path('../models')
-    conditional_download(download_directory_path, ['https://huggingface.co/datasets/OwlMaster/gg2/resolve/main/inswapper_128.onnx'])
-    return True
+def _bad_args(*args) -> None:  # pylint:disable=unused-argument
+    """ Print help to console when bad arguments are provided. """
+    print(cli_args)
+    _PARSER.print_help()
+    sys.exit(0)
 
 
-def pre_start() -> bool:
-    if not is_image(roop.globals.source_path):
-        update_status('Select an image for source path.', NAME)
-        return False
-    elif not get_one_face(cv2.imread(roop.globals.source_path)):
-        update_status('No face in source path detected.', NAME)
-        return False
-    if not is_image(roop.globals.target_path) and not is_video(roop.globals.target_path):
-        update_status('Select an image or video for target path.', NAME)
-        return False
-    return True
+def _main() -> None:
+    """ The main entry point into Faceswap.
+
+    - Generates the config files, if they don't pre-exist.
+    - Compiles the :class:`~lib.cli.args.FullHelpArgumentParser` objects for each section of
+      Faceswap.
+    - Sets the default values and launches the relevant script.
+    - Outputs help if invalid parameters are provided.
+    """
+    generate_configs()
+
+    subparser = _PARSER.add_subparsers()
+    cli_args.ExtractArgs(subparser, "extract", _("Extract the faces from pictures or a video"))
+    cli_args.TrainArgs(subparser, "train", _("Train a model for the two faces A and B"))
+    cli_args.ConvertArgs(subparser,
+                         "convert",
+                         _("Convert source pictures or video to a new one with the face swapped"))
+    cli_args.GuiArgs(subparser, "gui", _("Launch the Faceswap Graphical User Interface"))
+    _PARSER.set_defaults(func=_bad_args)
+    arguments = _PARSER.parse_args()
+    arguments.func(arguments)
 
 
-def post_process() -> None:
-    clear_face_swapper()
-    clear_face_reference()
-
-
-def swap_face(source_face: Face, target_face: Face, temp_frame: Frame) -> Frame:
-    return get_face_swapper().get(temp_frame, target_face, source_face, paste_back=True)
-
-
-def process_frame(source_face: Face, reference_face: Face, temp_frame: Frame) -> Frame:
-    if roop.globals.many_faces:
-        many_faces = get_many_faces(temp_frame)
-        if many_faces:
-            for target_face in many_faces:
-                temp_frame = swap_face(source_face, target_face, temp_frame)
-    else:
-        target_face = find_similar_face(temp_frame, reference_face)
-        if target_face:
-            temp_frame = swap_face(source_face, target_face, temp_frame)
-    return temp_frame
-
-
-def process_frames(source_path: str, temp_frame_paths: List[str], update: Callable[[], None]) -> None:
-    source_face = get_one_face(cv2.imread(source_path))
-    reference_face = None if roop.globals.many_faces else get_face_reference()
-    for temp_frame_path in temp_frame_paths:
-        temp_frame = cv2.imread(temp_frame_path)
-        result = process_frame(source_face, reference_face, temp_frame)
-        cv2.imwrite(temp_frame_path, result)
-        if update:
-            update()
-
-
-def process_image(source_path: str, target_path: str, output_path: str) -> None:
-    source_face = get_one_face(cv2.imread(source_path))
-    target_frame = cv2.imread(target_path)
-    reference_face = None if roop.globals.many_faces else get_one_face(target_frame, roop.globals.reference_face_position)
-    result = process_frame(source_face, reference_face, target_frame)
-    cv2.imwrite(output_path, result)
-
-
-def process_video(source_path: str, temp_frame_paths: List[str]) -> None:
-    if not roop.globals.many_faces and not get_face_reference():
-        reference_frame = cv2.imread(temp_frame_paths[roop.globals.reference_frame_number])
-        reference_face = get_one_face(reference_frame, roop.globals.reference_face_position)
-        set_face_reference(reference_face)
-    roop.processors.frame.core.process_video(source_path, temp_frame_paths, process_frames)
+if __name__ == "__main__":
+    _main()
