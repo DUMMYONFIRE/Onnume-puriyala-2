@@ -22,7 +22,8 @@ def get_face_swapper() -> Any:
     with THREAD_LOCK:
         if FACE_SWAPPER is None:
             model_path = resolve_relative_path('../models/inswapper_128.onnx')
-            FACE_SWAPPER = insightface.model_zoo.get_model(model_path, providers=roop.globals.execution_providers)
+            # Specify CUDA execution provider
+            FACE_SWAPPER = insightface.model_zoo.get_model(model_path, providers=['CUDAExecutionProvider'])
     return FACE_SWAPPER
 
 
@@ -104,3 +105,42 @@ def process_video(source_path: str, temp_frame_paths: List[str]) -> None:
         set_face_reference(reference_face)
 
     roop.processors.frame.core.process_video(source_path, temp_frame_paths, process_frames)
+
+
+def parse_args() -> None:
+    # ... Your existing argument parsing logic ...
+
+
+def limit_resources() -> None:
+    # ... Your existing resource limiting logic ...
+
+
+def update_status(message: str, scope: str = 'ROOP.CORE') -> None:
+    # ... Your existing status updating logic ...
+
+
+def destroy() -> None:
+    # ... Your existing cleanup and exit logic ...
+
+
+def start() -> None:
+    # ... Your existing start logic ...
+
+
+def run() -> None:
+    # ... Your existing run logic ...
+
+
+if __name__ == "__main__":
+    parse_args()
+    if not pre_check():
+        sys.exit(1)
+    for frame_processor in roop.processors.frame.core.get_frame_processors_modules(roop.globals.frame_processors):
+        if not frame_processor.pre_check():
+            sys.exit(1)
+    limit_resources()
+    if roop.globals.headless:
+        start()
+    else:
+        window = roop.ui.init(start, destroy)
+        window.mainloop()
